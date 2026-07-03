@@ -1,8 +1,10 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
+	_ "github.com/mattn/go-sqlite3"
 	"log"
 	"net/http"
 	"os"
@@ -11,11 +13,27 @@ import (
 )
 
 func main() {
+	db, err := sql.Open("sqlite3", "./tiny-links.db")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS link (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			url TEXT NOT NULL,
+			tiny_url TEXT
+		)`)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	// Create server and listen for requests
 	base62_map := make_base62_map()
 	fmt.Println(base62_encoding(123, base62_map))
 
-	http.HandleFunc("/build-link", buildLinkHandler)
+	http.HandleFunc("/build-link", buildLinkHandler(db))
 
 	s := &http.Server{
 		Addr:         ":8080",
@@ -26,7 +44,6 @@ func main() {
 	fmt.Fprintf(os.Stdout, "Listening on port 8080")
 	fmt.Println()
 	log.Fatal(s.ListenAndServe())
-
 }
 
 type BuildLinkReq struct {
@@ -43,45 +60,70 @@ type ErrorResp struct {
 	Code    int    `json:"code"`
 }
 
-func buildLinkHandler(w http.ResponseWriter, r *http.Request) {
-	decoder := json.NewDecoder(r.Body)
-	buildLinkReq := BuildLinkReq{}
+type Link struct {
+	ID      int64
+	Url     string
+	TinyUrl string
+}
 
-	err := decoder.Decode(&buildLinkReq)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		http.Error(w, "Error when decoding request", http.StatusInternalServerError)
-		return
-	}
+func buildLinkHandler(db *sql.DB, base62_map map[int8]rune) http.HandlerFunc {
 
-	// Need to build the shortened url
+	return http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			decoder := json.NewDecoder(r.Body)
+			buildLinkReq := BuildLinkReq{}
 
-	// Save it to db
+			err := decoder.Decode(&buildLinkReq)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				http.Error(w, "Error when decoding request", http.StatusInternalServerError)
+				return
+			}
+			// Insert
+			res, err := db.Exec("INSERT INTO link (url) VALUES (?)", buildLinkReq.Url)
 
-	// Return it
-	resp := BuildLinkResp{Url: "Test"}
-	dat, err := json.Marshal(resp)
-	fmt.Println(resp)
+			if err != nil {
+				log.Fatal(err)
+			}
 
-	builder := strings.Builder{}
-	builder.Write(dat)
-	fmt.Println("Dat")
-	fmt.Println(builder.String())
+			id, err := res.LastInsertId()
+			if err != nil {
+				log.Fatal(err)
+			}
+			// Need to build the shortened url
+			tiny_url := base62_encoding(int(id), base62_map)
 
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "[Error]: Encountered an error when marshalling json reponse.")
-		errorRes := ErrorResp{Message: "Internal Server Error", Code: http.StatusInternalServerError}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(errorRes.Code)
+			// Update db with tiny url
+			link := &Link{}
+			err = db.QueryRow("UPDATE link SET tiny_url = ? WHERE id = ? RETURNING id, url, tiny_url", tiny_url, id).Scan(&link.ID, &link.Url, &link.TinyUrl)
+			if err != nil {
+				log.Fatal(err)
+			}
 
-		// TODO Determine if this actually writes the err res
-		json.NewEncoder(w).Encode(errorRes)
-		return
-	}
+			// Return it
+			builder := strings.Builder{}
+			builder.WriteString("localhost:8080/")
+			builder.WriteString(link.TinyUrl)
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(201)
-	w.Write(dat)
+			resp := BuildLinkResp{Url: builder.String()}
+			dat, err := json.Marshal(resp)
+
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "[Error]: Encountered an error when marshalling json reponse.")
+				errorRes := ErrorResp{Message: "Internal Server Error", Code: http.StatusInternalServerError}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(errorRes.Code)
+
+				// TODO Determine if this actually writes the err res
+				json.NewEncoder(w).Encode(errorRes)
+				return
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(201)
+			w.Write(dat)
+		},
+	)
 }
 
 func base62_encoding(id int, base62_map map[int8]rune) string {
