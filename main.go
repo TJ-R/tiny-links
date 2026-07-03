@@ -33,7 +33,7 @@ func main() {
 	base62_map := make_base62_map()
 	fmt.Println(base62_encoding(123, base62_map))
 
-	http.HandleFunc("/build-link", buildLinkHandler(db))
+	http.HandleFunc("/build-link", buildLinkHandler(db, base62_map))
 
 	s := &http.Server{
 		Addr:         ":8080",
