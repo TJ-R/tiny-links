@@ -34,6 +34,7 @@ func main() {
 	fmt.Println(base62_encoding(123, base62_map))
 
 	http.HandleFunc("/build-link", buildLinkHandler(db, base62_map))
+	http.HandleFunc("/{tiny_url}", redirectHandler(db))
 
 	s := &http.Server{
 		Addr:         ":8080",
@@ -50,7 +51,7 @@ type BuildLinkReq struct {
 	Url string `json:"url"`
 }
 
-// Upper case so that it is exported and not private
+// Upper case so that it is exported and public
 type BuildLinkResp struct {
 	Url string `json:"url"`
 }
@@ -66,8 +67,33 @@ type Link struct {
 	TinyUrl string
 }
 
-func buildLinkHandler(db *sql.DB, base62_map map[int8]rune) http.HandlerFunc {
+// Need to take tiny url and map it back to its long url
+// and redirect user
+func redirectHandler(db *sql.DB) http.HandlerFunc {
+	return http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			tiny_url := r.PathValue("tiny_url")
+			link := &Link{}
+			// Find original url in db
+			err := db.QueryRow("SELECT * FROM link WHERE tiny_url = (?)", tiny_url).Scan(&link.ID, &link.Url, &link.TinyUrl)
+			if err != nil {
+				log.Fatal(err)
+			}
+			// Redirect user & doubles as sending response
 
+			builder := strings.Builder{}
+			// This is to make it "absolute"
+			// Seems like things could become an issue if I don't
+			// validate links on building part.
+			// TODO Build Link valdiating middleware? or just validate the link
+			// TODO in buildLinkHandler. But this will do for now
+			builder.WriteString("//")
+			builder.WriteString(link.Url)
+			http.Redirect(w, r, builder.String(), http.StatusMovedPermanently)
+		})
+}
+
+func buildLinkHandler(db *sql.DB, base62_map map[int8]rune) http.HandlerFunc {
 	return http.HandlerFunc(
 		func(w http.ResponseWriter, r *http.Request) {
 			decoder := json.NewDecoder(r.Body)
