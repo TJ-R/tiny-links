@@ -33,6 +33,7 @@ func main() {
 	base62_map := make_base62_map()
 	fmt.Println(base62_encoding(123, base62_map))
 
+	http.HandleFunc("/", welcomeHandler())
 	http.HandleFunc("/build-link", buildLinkHandler(db, base62_map))
 	http.HandleFunc("/{tiny_url}", redirectHandler(db))
 
@@ -65,6 +66,13 @@ type Link struct {
 	ID      int64
 	Url     string
 	TinyUrl string
+}
+
+func welcomeHandler() http.HandlerFunc {
+	return http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			w.Write([]byte("Welcome to the tiny-links api"))
+		})
 }
 
 // Need to take tiny url and map it back to its long url
