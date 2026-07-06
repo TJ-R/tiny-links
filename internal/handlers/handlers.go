@@ -63,7 +63,6 @@ func RedirectHandler(db *sql.DB) http.HandlerFunc {
 			http.Redirect(w, r, builder.String(), http.StatusMovedPermanently)
 		})
 }
-
 func BuildLinkHandler(db *sql.DB, base62_map map[int8]rune) http.HandlerFunc {
 	return http.HandlerFunc(
 		func(w http.ResponseWriter, r *http.Request) {

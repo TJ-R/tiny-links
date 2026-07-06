@@ -19,6 +19,8 @@ func main() {
 	}
 	defer db.Close()
 
+	createTables(db)
+
 	// Create server and listen for requests
 	base62_map := utils.Make_base62_map()
 
